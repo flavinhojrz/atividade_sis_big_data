@@ -7,4 +7,9 @@
 #SBATCH --ntasks-per-node=4
 #SBATCH --time=0-0:5
 
-mpirun ./trapezio_mpi
+# Roda o programa uma vez para cada valor de n (numero de trapezios)
+for n in 4 8 16 100 1000 10000 100000 1000000 10000000
+do
+    echo "===== n = $n ====="
+    mpirun ./trapezio_mpi $n
+done
