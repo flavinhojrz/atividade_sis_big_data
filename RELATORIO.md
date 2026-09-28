@@ -93,7 +93,7 @@ cada um com `MPI_Recv` e soma. O número de trapézios n é passado na linha de 
 #include <math.h>
 #include <mpi.h>
 
-#define MAX_STRING 100
+#define MAX_STRING 400
 
 /* Função que vamos integrar */
 double f(double x){
