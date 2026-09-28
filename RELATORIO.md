@@ -230,10 +230,11 @@ cat saida_12345.out         # resultado
 
 ## 6. Resultados: analítico × estimado
 
-Teste local: **1 nó computacional** (host `vm`) com **4 processos por nó** (4 processos
-MPI no total). No NPAD, o script pede **2 nós com 4 processos por nó** (8 processos). Os
-valores são os mesmos, porque dividir o trabalho não muda a conta. Depois de rodar no NPAD,
-troque esta linha pelos nomes dos nós que aparecem nas linhas de saudação de `saida_JOBID.out`.
+Execução no supercomputador **NPAD/UFRN** (job 2132011, partição `amd-512`):
+
+- **Nós computacionais:** 2 (`r2n14` e `r2n46`)
+- **Processos por nó:** 4 (processos 0–3 em `r2n14`, 4–7 em `r2n46`)
+- **Total:** 8 processos MPI
 
 | n (trapézios) | Integral estimada | Integral exata | Erro absoluto |
 |--------------:|------------------:|---------------:|--------------:|
@@ -244,10 +245,10 @@ troque esta linha pelos nomes dos nós que aparecem nas linhas de saudação de 
 | 1 000         | 9,000004500000    | 9              | 4,50 × 10⁻⁶   |
 | 10 000        | 9,000000045000    | 9              | 4,50 × 10⁻⁸   |
 | 100 000       | 9,000000000450    | 9              | 4,50 × 10⁻¹⁰  |
-| 1 000 000     | 9,000000000005    | 9              | 4,56 × 10⁻¹²  |
-| 10 000 000    | 9,000000000000    | 9              | 3,6 × 10⁻¹⁵   |
+| 1 000 000     | 9,000000000004    | 9              | 4,48 × 10⁻¹²  |
+| 10 000 000    | 9,000000000000    | 9              | 4,09 × 10⁻¹⁴  |
 
-Com n = 1000, rodar com 1, 3 ou 4 processos dá **o mesmo resultado** (9,0000045): dividir o
+Em um teste local (1 nó), com n = 1000, rodar com 1, 3 ou 4 processos dá **o mesmo resultado** (9,0000045): dividir o
 trabalho não muda a conta, só quem a faz.
 
 ## 7. Análise
@@ -264,6 +265,6 @@ trabalho não muda a conta, só quem a faz.
   ```
 
   Para n = 100: 4,5/10 000 = 0,00045, que é o valor da tabela.
-- A partir de n = 1 000 000 o erro deixa de seguir 4,5/n² (em n = 10⁷ o esperado seria
-  4,5×10⁻¹⁴, mas deu 3,6×10⁻¹⁵). Aqui o erro do método já é tão pequeno quanto o
-  arredondamento dos números `double` do computador, que passa a dominar.
+- Nos valores muito grandes de n (10⁶ e 10⁷) o erro fica próximo de 4,5/n², mas não idêntico
+  (em n = 10⁶ deu 4,48×10⁻¹² em vez de 4,5×10⁻¹²). Aqui o erro do método já é tão pequeno
+  quanto o arredondamento dos números `double` do computador, que começa a interferir.
