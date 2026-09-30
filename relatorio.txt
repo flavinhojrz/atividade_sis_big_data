@@ -1,0 +1,248 @@
+RELATÓRIO - INTEGRAL COM MPI PELA REGRA DO TRAPÉZIO
+===================================================
+
+
+1. FUNÇÃO E LIMITES
+-------------------
+
+Função: f(x) = x²
+Limites: a = 0 e b = 3
+
+Escolhi x² porque é fácil de resolver na mão. Assim dá pra saber a resposta
+certa e conferir se o programa está acertando.
+
+
+2. RESOLVENDO A INTEGRAL NA MÃO
+-------------------------------
+
+A integral de 0 até 3 de x² é a área embaixo da curva y = x², entre x = 0 e x = 3.
+
+Passo 1 - Achar a primitiva.
+Regra: soma 1 no expoente e divide pelo expoente novo.
+
+    x²  ->  x³ / 3
+
+Passo 2 - Colocar os limites (valor no b menos valor no a).
+
+    (3³ / 3) - (0³ / 3) = 27/3 - 0 = 9
+
+Resposta certa: 9
+
+
+3. A REGRA DO TRAPÉZIO
+----------------------
+
+O computador não sabe achar primitiva. Então a gente corta a área em n fatias
+e troca cada fatia por um trapézio, que é fácil de calcular.
+
+Largura de cada fatia:
+
+    h = (b - a) / n
+
+Área de um trapézio:
+
+    (lado esquerdo + lado direito) / 2 x largura
+
+Somando todos os trapézios, as duas pontas entram pela metade e os pontos do
+meio entram inteiros:
+
+    Integral = h x [ f(x0)/2 + f(x1) + ... + f(xn-1) + f(xn)/2 ]
+
+Exemplo na mão com n = 4:
+
+    h = 3 / 4 = 0,75
+    pontos:  0     0,75     1,5    2,25     3
+    f(x):    0    0,5625   2,25   5,0625    9
+
+    pontas pela metade: (0 + 9) / 2 = 4,5
+    pontos do meio:     0,5625 + 2,25 + 5,0625 = 7,875
+    resultado:          0,75 x (4,5 + 7,875) = 9,28125
+
+Deu 9,28125, e o certo é 9. Com mais trapézios o erro diminui.
+
+
+4. COMO O MPI DIVIDE O TRABALHO
+-------------------------------
+
+Em vez de um processo fazer tudo, cada processo pega um pedaço do intervalo
+e calcula a regra do trapézio só no pedaço dele.
+
+Exemplo com 4 processos e n = 8 (2 trapézios pra cada):
+
+    processo 0: de 0    até 0,75
+    processo 1: de 0,75 até 1,5
+    processo 2: de 1,5  até 2,25
+    processo 3: de 2,25 até 3
+
+Depois, os processos 1, 2, 3... mandam o resultado pro processo 0 com MPI_Send.
+O processo 0 recebe com MPI_Recv, soma tudo e mostra o resultado.
+
+O código foi feito em cima do exemplo de saudação do professor. A saudação
+continua no código e agora mostra também o nome do nó onde cada processo rodou.
+
+
+5. O CÓDIGO (trapezio_mpi.c)
+----------------------------
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <mpi.h>
+
+#define MAX_STRING 400
+
+double f(double x){
+    return x * x;
+}
+
+double trapezio(double a_local, double b_local, long n_local, double h){
+    double soma = (f(a_local) + f(b_local)) / 2.0;
+    for(long i=1; i<n_local; i++){
+        soma += f(a_local + i*h);
+    }
+    return soma * h;
+}
+
+int main(int argc, char* argv[]){
+    char saudacao[MAX_STRING];
+    char nome_no[MPI_MAX_PROCESSOR_NAME];
+    int tam_nome;
+    int comm_sz;
+    int my_rank;
+
+    double a = 0.0, b = 3.0;
+    long n = 1000;
+    if(argc > 1) n = atol(argv[1]);
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+    MPI_Get_processor_name(nome_no, &tam_nome);
+
+    if(my_rank != 0){
+        snprintf(saudacao, MAX_STRING, "Saudacao do processo %d/%d (no: %s)!", my_rank, comm_sz, nome_no);
+        MPI_Send(saudacao, strlen(saudacao)+1, MPI_CHAR, 0, 0, MPI_COMM_WORLD);
+    } else {
+        printf("Saudacao do processo %d/%d (no: %s)!\n", my_rank, comm_sz, nome_no);
+        for(int i=1; i<comm_sz; i++){
+            MPI_Recv(saudacao, MAX_STRING, MPI_CHAR, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            printf("%s\n", saudacao);
+        }
+    }
+
+    double h = (b - a) / n;
+    long n_local = n / comm_sz;
+    double a_local = a + my_rank * n_local * h;
+    double b_local = a_local + n_local * h;
+
+    if(my_rank == comm_sz - 1){
+        n_local = n - my_rank * (n / comm_sz);
+        b_local = b;
+    }
+
+    double integral_local = trapezio(a_local, b_local, n_local, h);
+
+    if(my_rank != 0){
+        MPI_Send(&integral_local, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+    } else {
+        double total = integral_local;
+        double parcial;
+        for(int i=1; i<comm_sz; i++){
+            MPI_Recv(&parcial, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            total += parcial;
+        }
+
+        double exato = (b*b*b - a*a*a) / 3.0;
+        printf("n = %ld | estimado = %.12f | exato = %.12f | erro = %.3e\n",
+               n, total, exato, fabs(total - exato));
+    }
+
+    MPI_Finalize();
+    return 0;
+}
+
+O que cada parte faz:
+
+- f(x): é a função x².
+- trapezio(...): faz a conta do trapézio no pedaço de cada processo. Começa
+  com as pontas pela metade, soma os pontos do meio e multiplica por h.
+- comm_sz: quantos processos estão rodando.
+- my_rank: o número de cada processo (0, 1, 2...).
+- h: a largura de cada trapézio.
+- n_local: quantos trapézios cada processo faz (n dividido pelo número de
+  processos).
+- a_local e b_local: onde começa e onde termina o pedaço de cada processo.
+- Se a divisão não for exata, o último processo pega os trapézios que sobraram.
+- integral_local: a área do pedaço de cada processo.
+- total: a soma de todos os pedaços, feita pelo processo 0.
+
+
+6. COMO RODAR NO NPAD
+---------------------
+
+Script de submissão (job_trapezio.sh):
+
+#!/bin/bash
+#SBATCH --job-name=trapezio
+#SBATCH --output=saida_%j.out
+#SBATCH --error=erro_%j.err
+#SBATCH --partition=amd-512
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=4
+#SBATCH --time=0-0:5
+
+for n in 4 8 16 100 1000 10000 100000 1000000 10000000
+do
+    echo "===== n = $n ====="
+    mpirun ./trapezio_mpi $n
+done
+
+Ele pede 2 nós com 4 processos em cada nó (8 processos no total) e roda o
+programa uma vez pra cada valor de n.
+
+Comandos:
+
+    mpicc trapezio_mpi.c -o trapezio_mpi -lm
+    sbatch job_trapezio.sh
+    cat saida_*.out
+
+
+7. RESULTADOS
+-------------
+
+Rodou no supercomputador NPAD (UFRN), na partição amd-512.
+
+    Nós computacionais: 2 (r2n14 e r2n46)
+    Processos por nó:   4
+    Total de processos: 8
+
+    n            valor calculado     valor exato   erro
+    ---------------------------------------------------------
+    4            9,281250000000      9             2,81 x 10^-1
+    8            9,070312500000      9             7,03 x 10^-2
+    16           9,017578125000      9             1,76 x 10^-2
+    100          9,000450000000      9             4,50 x 10^-4
+    1000         9,000004500000      9             4,50 x 10^-6
+    10000        9,000000045000      9             4,50 x 10^-8
+    100000       9,000000000450      9             4,50 x 10^-10
+    1000000      9,000000000004      9             4,48 x 10^-12
+    10000000     9,000000000000      9             4,09 x 10^-14
+
+
+8. CONCLUSÃO
+------------
+
+- Quanto mais trapézios, menor o erro. Quando o n fica 10 vezes maior, o erro
+  fica 100 vezes menor.
+
+- O resultado sempre passa um pouquinho de 9. Isso acontece porque a curva x²
+  é curvada pra cima, então o topo reto do trapézio fica um pouco acima da curva.
+
+- Com n = 4 o programa deu 9,28125, igual à conta feita na mão.
+
+- Com n muito grande (1 milhão ou mais), o erro fica tão pequeno que os
+  arredondamentos do próprio computador começam a aparecer.
+
+- Dividir o trabalho entre processos não muda a resposta. Só muda quem faz
+  a conta.
