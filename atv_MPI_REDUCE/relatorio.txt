@@ -1,0 +1,211 @@
+RELATÓRIO - TRAPÉZIO COM MPI_REDUCE x MPI_SEND/MPI_RECV
+=======================================================
+
+
+1. FUNÇÃO E LIMITES
+-------------------
+
+Função: f(x) = x²
+Limites: a = 0 e b = 3
+
+Valor exato (feito na mão):
+
+    primitiva de x² = x³ / 3
+    (3³ / 3) - (0³ / 3) = 27/3 - 0 = 9
+
+
+2. O QUE MUDOU
+--------------
+
+Na atividade anterior, cada processo mandava o seu resultado pro processo 0
+com MPI_Send, e o processo 0 recebia um por um com MPI_Recv dentro de um for
+e ia somando.
+
+Agora tudo isso virou uma linha só:
+
+    MPI_Reduce(&integral_local, &total, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+O que cada parte quer dizer:
+
+    &integral_local  -> o valor que cada processo calculou
+    &total           -> onde o resultado final vai ficar (só no processo 0)
+    1                -> é 1 número
+    MPI_DOUBLE       -> do tipo double
+    MPI_SUM          -> a operação é somar
+    0                -> o resultado vai pro processo 0
+
+Todos os processos chamam o MPI_Reduce, e o próprio MPI se vira pra juntar e
+somar. Além de deixar o código menor, o MPI_Reduce pode juntar os valores em
+forma de "árvore" (processos somam aos pares ao mesmo tempo), em vez de o
+processo 0 receber um por um.
+
+Pra comparação ser justa, tirei a parte da saudação das duas versões. Assim a
+única diferença entre elas é o jeito de juntar os resultados.
+
+
+3. O CÓDIGO NOVO (trapezio_reduce.c)
+------------------------------------
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <mpi.h>
+
+double f(double x){
+    return x * x;
+}
+
+double trapezio(double a_local, double b_local, long n_local, double h){
+    double soma = (f(a_local) + f(b_local)) / 2.0;
+    for(long i=1; i<n_local; i++){
+        soma += f(a_local + i*h);
+    }
+    return soma * h;
+}
+
+int main(int argc, char* argv[]){
+    int comm_sz;
+    int my_rank;
+
+    double a = 0.0, b = 3.0;
+    long n = 1000;
+    if(argc > 1) n = atol(argv[1]);
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+
+    double h = (b - a) / n;
+    long n_local = n / comm_sz;
+    double a_local = a + my_rank * n_local * h;
+    double b_local = a_local + n_local * h;
+
+    if(my_rank == comm_sz - 1){
+        n_local = n - my_rank * (n / comm_sz);
+        b_local = b;
+    }
+
+    double integral_local = trapezio(a_local, b_local, n_local, h);
+
+    double total = 0.0;
+    MPI_Reduce(&integral_local, &total, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+    if(my_rank == 0){
+        double exato = (b*b*b - a*a*a) / 3.0;
+        printf("versao = reduce | p = %d | n = %ld | estimado = %.12f | erro = %.3e\n",
+               comm_sz, n, total, fabs(total - exato));
+    }
+
+    MPI_Finalize();
+    return 0;
+}
+
+
+4. COMO FOI MEDIDO
+------------------
+
+Cada versão foi rodada no NPAD (partição amd-512) com o comando time na frente
+do srun, que mede o tempo total do programa (do começo ao fim).
+
+Valores testados:
+    n (trapézios): 1 milhão, 10 milhões, 100 milhões, 1 bilhão e 10 bilhões
+    p (processos): 1, 2, 4, 8, 16, 32 e 64
+
+Nós e processos por nó:
+    p de 1 até 32 -> 1 nó com p processos
+    p = 64        -> 2 nós com 32 processos em cada
+
+Script usado (job_tempos.sh):
+
+#!/bin/bash
+#SBATCH --job-name=trap_tempos
+#SBATCH --output=saida_%j.out
+#SBATCH --partition=amd-512
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=32
+#SBATCH --time=0-0:30
+
+TIMEFORMAT="tempo = %R s"
+echo "Nos alocados: $SLURM_JOB_NODELIST"
+
+for n in 1000000 10000000 100000000 1000000000 10000000000
+do
+    for p in 1 2 4 8 16 32 64
+    do
+        if [ $p -le 32 ]; then nos=1; else nos=2; fi
+        echo "----- n = $n | p = $p | nos = $nos -----"
+        time srun -N $nos -n $p ./trapezio_send $n
+        time srun -N $nos -n $p ./trapezio_reduce $n
+    done
+done
+
+Comandos:
+
+    mpicc trapezio_send.c -o trapezio_send -lm
+    mpicc trapezio_reduce.c -o trapezio_reduce -lm
+    sbatch job_tempos.sh
+    cat saida_*.out
+
+
+5. RESULTADOS
+-------------
+
+Nós usados: [PREENCHER com a linha "Nos alocados" da saída]
+
+Tempo total em segundos (medido com time):
+
+    n = 1 000 000
+    p      send       reduce
+    1      [ ]        [ ]
+    2      [ ]        [ ]
+    4      [ ]        [ ]
+    8      [ ]        [ ]
+    16     [ ]        [ ]
+    32     [ ]        [ ]
+    64     [ ]        [ ]
+
+    n = 10 000 000
+    p      send       reduce
+    1      [ ]        [ ]
+    2      [ ]        [ ]
+    4      [ ]        [ ]
+    8      [ ]        [ ]
+    16     [ ]        [ ]
+    32     [ ]        [ ]
+    64     [ ]        [ ]
+
+    n = 100 000 000
+    p      send       reduce
+    1      [ ]        [ ]
+    2      [ ]        [ ]
+    4      [ ]        [ ]
+    8      [ ]        [ ]
+    16     [ ]        [ ]
+    32     [ ]        [ ]
+    64     [ ]        [ ]
+
+    n = 1 000 000 000
+    p      send       reduce
+    1      [ ]        [ ]
+    2      [ ]        [ ]
+    4      [ ]        [ ]
+    8      [ ]        [ ]
+    16     [ ]        [ ]
+    32     [ ]        [ ]
+    64     [ ]        [ ]
+
+    n = 10 000 000 000
+    p      send       reduce
+    1      [ ]        [ ]
+    2      [ ]        [ ]
+    4      [ ]        [ ]
+    8      [ ]        [ ]
+    16     [ ]        [ ]
+    32     [ ]        [ ]
+    64     [ ]        [ ]
+
+
+6. CONCLUSÃO
+------------
+
+[PREENCHER depois de rodar no NPAD]
