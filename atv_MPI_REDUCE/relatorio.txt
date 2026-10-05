@@ -8,18 +8,34 @@ RELATÓRIO - TRAPÉZIO COM MPI_REDUCE x MPI_SEND/MPI_RECV
 Função: f(x) = x²
 Limites: a = 0 e b = 3
 
+São os mesmos da atividade anterior.
+
 Valor exato (feito na mão):
 
     primitiva de x² = x³ / 3
     (3³ / 3) - (0³ / 3) = 27/3 - 0 = 9
 
+Resposta certa: 9
+
 
 2. O QUE MUDOU
 --------------
 
-Na atividade anterior, cada processo mandava o seu resultado pro processo 0
-com MPI_Send, e o processo 0 recebia um por um com MPI_Recv dentro de um for
-e ia somando.
+Na atividade anterior, o processo 0 juntava os resultados assim:
+
+    if(my_rank != 0){
+        MPI_Send(&integral_local, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+    } else {
+        double total = integral_local;
+        double parcial;
+        for(int i=1; i<comm_sz; i++){
+            MPI_Recv(&parcial, 1, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            total += parcial;
+        }
+    }
+
+Cada processo mandava o seu valor com MPI_Send, e o processo 0 recebia um por
+um com MPI_Recv e ia somando.
 
 Agora tudo isso virou uma linha só:
 
@@ -28,16 +44,16 @@ Agora tudo isso virou uma linha só:
 O que cada parte quer dizer:
 
     &integral_local  -> o valor que cada processo calculou
-    &total           -> onde o resultado final vai ficar (só no processo 0)
+    &total           -> onde fica o resultado final (só no processo 0)
     1                -> é 1 número
     MPI_DOUBLE       -> do tipo double
     MPI_SUM          -> a operação é somar
     0                -> o resultado vai pro processo 0
 
-Todos os processos chamam o MPI_Reduce, e o próprio MPI se vira pra juntar e
-somar. Além de deixar o código menor, o MPI_Reduce pode juntar os valores em
-forma de "árvore" (processos somam aos pares ao mesmo tempo), em vez de o
-processo 0 receber um por um.
+Todos os processos chamam o MPI_Reduce, e o próprio MPI junta e soma tudo.
+O código fica menor e mais fácil de ler. Além disso, o MPI_Reduce pode somar
+em forma de "árvore" (os processos vão somando aos pares ao mesmo tempo), em
+vez do processo 0 ter que receber um por um.
 
 Pra comparação ser justa, tirei a parte da saudação das duas versões. Assim a
 única diferença entre elas é o jeito de juntar os resultados.
@@ -100,112 +116,91 @@ int main(int argc, char* argv[]){
     return 0;
 }
 
+A versão antiga (trapezio_send.c) é igual, só muda a parte de juntar os
+resultados, que usa MPI_Send e MPI_Recv.
+
 
 4. COMO FOI MEDIDO
 ------------------
 
-Cada versão foi rodada no NPAD (partição amd-512) com o comando time na frente
-do srun, que mede o tempo total do programa (do começo ao fim).
+Rodei as duas versões no supercomputador NPAD (UFRN), na partição amd-512.
+O tempo foi medido com o comando time na frente do srun. Ele mede o tempo
+total do programa, do começo ao fim.
 
 Valores testados:
+
     n (trapézios): 1 milhão, 10 milhões, 100 milhões, 1 bilhão e 10 bilhões
     p (processos): 1, 2, 4, 8, 16, 32 e 64
 
 Nós e processos por nó:
+
     p de 1 até 32 -> 1 nó com p processos
     p = 64        -> 2 nós com 32 processos em cada
+
+Antes de começar a medir, o script roda o programa uma vez sem medir, só pra
+"aquecer". A primeira execução do MPI costuma ser mais lenta e ia atrapalhar
+a primeira medida.
 
 Script usado (job_tempos.sh):
 
 #!/bin/bash
 #SBATCH --job-name=trap_tempos
-#SBATCH --output=saida_%j.out
+#SBATCH --output=tabela_tempos.txt
 #SBATCH --partition=amd-512
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=32
 #SBATCH --time=0-0:30
 
-TIMEFORMAT="tempo = %R s"
+TIMEFORMAT="%R"
+rm -f resultados_programa.txt
+srun -N 1 -n 1 ./trapezio_send 1000 > /dev/null 2>&1
+
 echo "Nos alocados: $SLURM_JOB_NODELIST"
+echo ""
+printf "%-14s %-5s %-5s %-12s %-12s\n" "n" "p" "nos" "send (s)" "reduce (s)"
 
 for n in 1000000 10000000 100000000 1000000000 10000000000
 do
     for p in 1 2 4 8 16 32 64
     do
         if [ $p -le 32 ]; then nos=1; else nos=2; fi
-        echo "----- n = $n | p = $p | nos = $nos -----"
-        time srun -N $nos -n $p ./trapezio_send $n
-        time srun -N $nos -n $p ./trapezio_reduce $n
+        t_send=$( { time srun -N $nos -n $p ./trapezio_send $n >> resultados_programa.txt 2>&1; } 2>&1 )
+        t_reduce=$( { time srun -N $nos -n $p ./trapezio_reduce $n >> resultados_programa.txt 2>&1; } 2>&1 )
+        printf "%-14s %-5s %-5s %-12s %-12s\n" $n $p $nos $t_send $t_reduce
     done
+    echo ""
 done
 
-Comandos:
-
-    mpicc trapezio_send.c -o trapezio_send -lm
-    mpicc trapezio_reduce.c -o trapezio_reduce -lm
-    sbatch job_tempos.sh
-    cat saida_*.out
+Ele salva a tabela de tempos em tabela_tempos.txt e as respostas de cada
+execução em resultados_programa.txt.
 
 
 5. RESULTADOS
 -------------
 
-Nós usados: [PREENCHER com a linha "Nos alocados" da saída]
+Tempo total de cada execução, em segundos:
 
-Tempo total em segundos (medido com time):
+COLE AQUI O CONTEÚDO DO ARQUIVO tabela_tempos.txt
 
-    n = 1 000 000
-    p      send       reduce
-    1      [ ]        [ ]
-    2      [ ]        [ ]
-    4      [ ]        [ ]
-    8      [ ]        [ ]
-    16     [ ]        [ ]
-    32     [ ]        [ ]
-    64     [ ]        [ ]
-
-    n = 10 000 000
-    p      send       reduce
-    1      [ ]        [ ]
-    2      [ ]        [ ]
-    4      [ ]        [ ]
-    8      [ ]        [ ]
-    16     [ ]        [ ]
-    32     [ ]        [ ]
-    64     [ ]        [ ]
-
-    n = 100 000 000
-    p      send       reduce
-    1      [ ]        [ ]
-    2      [ ]        [ ]
-    4      [ ]        [ ]
-    8      [ ]        [ ]
-    16     [ ]        [ ]
-    32     [ ]        [ ]
-    64     [ ]        [ ]
-
-    n = 1 000 000 000
-    p      send       reduce
-    1      [ ]        [ ]
-    2      [ ]        [ ]
-    4      [ ]        [ ]
-    8      [ ]        [ ]
-    16     [ ]        [ ]
-    32     [ ]        [ ]
-    64     [ ]        [ ]
-
-    n = 10 000 000 000
-    p      send       reduce
-    1      [ ]        [ ]
-    2      [ ]        [ ]
-    4      [ ]        [ ]
-    8      [ ]        [ ]
-    16     [ ]        [ ]
-    32     [ ]        [ ]
-    64     [ ]        [ ]
+As duas versões deram o mesmo valor da integral em todos os casos (o valor
+de cada execução está em resultados_programa.txt).
 
 
 6. CONCLUSÃO
 ------------
 
-[PREENCHER depois de rodar no NPAD]
+- As duas versões deram praticamente o mesmo tempo. Isso acontece porque cada
+  processo só manda 1 número no final. Mandar 1 número leva muito menos tempo
+  que calcular os trapézios ou iniciar o MPI, então o jeito de juntar quase
+  não pesa no tempo total.
+
+- Com n pequeno (1 milhão ou 10 milhões), colocar mais processos não ajuda e
+  pode até piorar. A conta é tão rápida que o que mais pesa é o tempo de
+  iniciar os processos.
+
+- Com n grande (1 bilhão e 10 bilhões), aí sim compensa: quanto mais
+  processos, menor o tempo, porque cada um faz um pedaço menor da conta.
+
+- A vantagem do MPI_Reduce é deixar o código mais simples. Com muito mais
+  processos (milhares), o jeito em "árvore" dele também ficaria mais rápido
+  que o processo 0 receber um por um.
