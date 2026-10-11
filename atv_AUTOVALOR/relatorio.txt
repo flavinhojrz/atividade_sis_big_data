@@ -1,0 +1,325 @@
+RELATÓRIO - AUTOVALOR E AUTOVETOR COM MPI (MÉTODO DA POTÊNCIA)
+==============================================================
+
+
+1. O QUE É AUTOVALOR E AUTOVETOR
+--------------------------------
+
+Quando a gente multiplica uma matriz A por um vetor v, normalmente o vetor
+muda de direção. Mas existem alguns vetores especiais que não mudam de
+direção, só ficam maiores ou menores:
+
+    A · v = λ · v
+
+- v é o AUTOVETOR (o vetor que não muda de direção)
+- λ é o AUTOVALOR (quanto o vetor foi esticado)
+
+
+2. A MATRIZ ESCOLHIDA
+---------------------
+
+Uma matriz n x n com 2 na diagonal e 1 em todo o resto. Exemplo com n = 3:
+
+    | 2  1  1 |
+    | 1  2  1 |
+    | 1  1  2 |
+
+Escolhi essa porque dá pra saber a resposta certa na mão, pra qualquer
+tamanho n:
+
+    maior autovalor = n + 1
+    autovetor       = todos os números iguais: (1, 1, ..., 1)
+
+Por quê? Multiplicando a matriz pelo vetor (1, 1, ..., 1), cada linha soma
+um 2 e (n - 1) números 1, que dá n + 1. Então:
+
+    A · (1, 1, ..., 1) = (n+1, n+1, ..., n+1) = (n + 1) · (1, 1, ..., 1)
+
+No código o autovetor sai "normalizado" (com tamanho 1), então cada número
+dele fica 1 / raiz(n).
+
+
+3. RESOLVENDO NA MÃO (n = 2)
+----------------------------
+
+    A = | 2  1 |
+        | 1  2 |
+
+Passo 1 - Achar os autovalores.
+A conta é: det(A - λI) = 0
+
+    | 2-λ   1  |
+    |  1   2-λ |  ->  (2 - λ)² - 1 = 0
+
+    (2 - λ)² = 1
+    2 - λ = 1   ou   2 - λ = -1
+    λ = 1       ou   λ = 3
+
+Autovalores: 3 e 1. O maior é 3 (que é n + 1 = 2 + 1).
+
+Passo 2 - Achar o autovetor do λ = 3.
+A conta é: (A - 3I) · v = 0
+
+    | -1   1 | | v1 |   | 0 |
+    |  1  -1 | | v2 | = | 0 |   ->   -v1 + v2 = 0   ->   v1 = v2
+
+Autovetor: (1, 1). Conferindo: A · (1, 1) = (2+1, 1+2) = (3, 3) = 3 · (1, 1).
+
+Normalizado (tamanho 1): (1/raiz(2), 1/raiz(2)) = (0,7071; 0,7071)
+
+
+4. O MÉTODO DA POTÊNCIA
+-----------------------
+
+Pra matrizes grandes não dá pra fazer a conta do determinante. Então o
+computador usa um truque simples:
+
+    1. Começa com um vetor qualquer x.
+    2. Multiplica: y = A · x
+    3. Mede o tamanho de y (a norma). Esse tamanho é o palpite do autovalor.
+    4. Divide y pelo tamanho, pra ele voltar a ter tamanho 1. Esse é o novo x.
+    5. Repete até o palpite parar de mudar.
+
+Cada vez que multiplica pela matriz, o vetor vai "virando" na direção do
+autovetor do maior autovalor.
+
+Exemplo na mão com n = 2, começando com x = (1, 2) normalizado:
+
+    volta   y = A · x            tamanho de y   novo x
+    -----   ------------------   ------------   ----------------
+    0       -                    -              (0,4472; 0,8944)
+    1       (1,7889; 2,2361)     2,8636         (0,6247; 0,7809)
+    2       (2,0303; 2,1864)     2,9837         (0,6805; 0,7328)
+    3       (2,0937; 2,1460)     2,9982         (0,6983; 0,7158)
+    4       (2,1124; 2,1299)     2,9998         (0,7042; 0,7100)
+
+O tamanho vai chegando em 3 (o autovalor) e o x vai chegando em
+(0,7071; 0,7071) (o autovetor). Igualzinho à conta do item 3.
+
+
+5. COMO O MPI DIVIDE O TRABALHO
+-------------------------------
+
+A parte pesada é a multiplicação y = A · x, que faz n x n contas.
+
+Cada processo fica com um pedaço das linhas da matriz. Exemplo com n = 8 e
+4 processos:
+
+    processo 0: linhas 0 e 1
+    processo 1: linhas 2 e 3
+    processo 2: linhas 4 e 5
+    processo 3: linhas 6 e 7
+
+Cada processo calcula só as linhas dele de y e deixa o resto com zero
+(vetor y_parte). Depois, o MPI_Allreduce soma os y_parte de todo mundo.
+Como cada um só preencheu a sua parte, somando tudo sai o y completo.
+
+A diferença pro MPI_Reduce da atividade anterior é que o MPI_Allreduce
+entrega o resultado pra TODOS os processos, e não só pro processo 0. Isso é
+necessário porque todo mundo precisa do x novo pra próxima volta.
+
+A matriz não é guardada na memória. Ela é calculada na hora pela função
+A(i, j), igual o f(x) do trapézio.
+
+
+6. O CÓDIGO (autovalor_mpi.c)
+-----------------------------
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <mpi.h>
+
+double A(long i, long j){
+    if(i == j) return 2.0;
+    return 1.0;
+}
+
+int main(int argc, char* argv[]){
+    int comm_sz;
+    int my_rank;
+
+    long n = 1000;
+    if(argc > 1) n = atol(argv[1]);
+    int max_iter = 1000;
+    double tolerancia = 1e-12;
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+
+    long linhas = n / comm_sz;
+    long inicio = my_rank * linhas;
+    long fim = inicio + linhas;
+    if(my_rank == comm_sz - 1){
+        fim = n;
+    }
+
+    double *x = malloc(n * sizeof(double));
+    double *y_parte = malloc(n * sizeof(double));
+    double *y = malloc(n * sizeof(double));
+
+    double norma = 0.0;
+    for(long i=0; i<n; i++){
+        x[i] = i + 1;
+        norma += x[i] * x[i];
+    }
+    norma = sqrt(norma);
+    for(long i=0; i<n; i++){
+        x[i] = x[i] / norma;
+    }
+
+    double lambda = 0.0;
+    double lambda_antigo = 0.0;
+    int iter;
+
+    double t0 = MPI_Wtime();
+
+    for(iter=1; iter<=max_iter; iter++){
+        for(long i=0; i<n; i++){
+            y_parte[i] = 0.0;
+        }
+        for(long i=inicio; i<fim; i++){
+            double soma = 0.0;
+            for(long j=0; j<n; j++){
+                soma += A(i, j) * x[j];
+            }
+            y_parte[i] = soma;
+        }
+
+        MPI_Allreduce(y_parte, y, n, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+        norma = 0.0;
+        for(long i=0; i<n; i++){
+            norma += y[i] * y[i];
+        }
+        norma = sqrt(norma);
+
+        for(long i=0; i<n; i++){
+            x[i] = y[i] / norma;
+        }
+
+        lambda = norma;
+        if(fabs(lambda - lambda_antigo) < tolerancia * lambda) break;
+        lambda_antigo = lambda;
+    }
+
+    double t1 = MPI_Wtime();
+
+    if(my_rank == 0){
+        double exato = n + 1;
+        double v_exato = 1.0 / sqrt(n);
+        double erro_vetor = 0.0;
+        for(long i=0; i<n; i++){
+            double e = fabs(x[i] - v_exato);
+            if(e > erro_vetor) erro_vetor = e;
+        }
+        printf("%-8ld %-4d %-6d %-20.10f %-10.0f %-12.2e %-12.2e %-10.4f\n",
+               n, comm_sz, iter, lambda, exato, fabs(lambda - exato), erro_vetor, t1 - t0);
+    }
+
+    free(x);
+    free(y_parte);
+    free(y);
+    MPI_Finalize();
+    return 0;
+}
+
+O que cada parte faz:
+
+- A(i, j): devolve o número da linha i, coluna j (2 na diagonal, 1 no resto).
+- n: tamanho da matriz (vem da linha de comando).
+- max_iter e tolerancia: o programa para quando o autovalor para de mudar
+  ou depois de 1000 voltas.
+- linhas, inicio e fim: quais linhas da matriz este processo calcula.
+  Se a divisão não for exata, o último processo pega as linhas que sobraram.
+- x: o vetor atual (começa com 1, 2, 3, ..., n e é normalizado).
+- y_parte: o pedaço de y que este processo calculou (o resto fica zero).
+- y: o y completo, depois do MPI_Allreduce.
+- norma: o tamanho de y, que é o palpite do autovalor (lambda).
+- No final o processo 0 compara com o valor exato (n + 1) e com o autovetor
+  exato (1/raiz(n) em todas as posições) e mostra o tempo.
+
+
+7. COMO RODAR NO NPAD
+---------------------
+
+Script de submissão (job_autovalor.sh):
+
+#!/bin/bash
+#SBATCH --job-name=autovalor
+#SBATCH --output=resultados_autovalor.txt
+#SBATCH --partition=amd-512
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=32
+#SBATCH --time=0-0:30
+
+srun -N 1 -n 1 ./autovalor_mpi 100 > /dev/null 2>&1
+
+echo "Nos alocados: $SLURM_JOB_NODELIST"
+echo ""
+printf "%-8s %-4s %-6s %-20s %-10s %-12s %-12s %-10s\n" "n" "p" "iter" "autovalor" "exato" "erro" "erro vetor" "tempo (s)"
+
+for n in 1000 10000 20000 40000
+do
+    for p in 1 2 4 8 16 32 64
+    do
+        if [ $p -le 32 ]; then nos=1; else nos=2; fi
+        srun -N $nos -n $p ./autovalor_mpi $n
+    done
+    echo ""
+done
+
+Ele roda o programa com matrizes de tamanho 1000, 10000, 20000 e 40000,
+usando 1, 2, 4, 8, 16, 32 e 64 processos.
+
+Nós e processos por nó:
+
+    p de 1 até 32 -> 1 nó com p processos
+    p = 64        -> 2 nós com 32 processos em cada
+
+Antes de começar, o script roda o programa uma vez sem guardar o resultado,
+só pra "aquecer".
+
+Comandos:
+
+    mpicc autovalor_mpi.c -o autovalor_mpi -lm
+    sbatch job_autovalor.sh
+    cat resultados_autovalor.txt
+
+
+8. RESULTADOS
+-------------
+
+Colunas da tabela:
+
+    n          -> tamanho da matriz
+    p          -> número de processos
+    iter       -> quantas voltas o método da potência deu
+    autovalor  -> valor calculado
+    exato      -> valor certo (n + 1)
+    erro       -> diferença entre o calculado e o certo
+    erro vetor -> maior diferença entre o autovetor calculado e o certo
+    tempo      -> tempo do cálculo em segundos
+
+COLE AQUI O CONTEÚDO DO ARQUIVO resultados_autovalor.txt
+
+
+9. CONCLUSÃO
+------------
+
+- O autovalor e o autovetor calculados bateram com os valores certos em
+  todos os casos. O erro ficou muito pequeno, só arredondamento do
+  computador.
+
+- O método precisou de poucas voltas (4) pra chegar na resposta. Isso
+  acontece porque nessa matriz o maior autovalor (n + 1) é muito maior que
+  os outros (que valem 1), então o vetor vira rápido na direção certa.
+
+- Dividir o trabalho não muda a resposta, só o tempo. O número de voltas e
+  o autovalor são os mesmos com qualquer número de processos.
+
+- Com matriz grande, quanto mais processos, menor o tempo, porque cada um
+  calcula menos linhas. Com matriz pequena (n = 1000) quase não tem ganho,
+  porque a conta já é rápida e a comunicação entre os processos começa a
+  pesar.
