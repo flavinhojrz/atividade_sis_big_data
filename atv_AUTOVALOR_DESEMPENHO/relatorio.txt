@@ -269,41 +269,50 @@ Os gráficos estão em arquivos separados, junto com este relatório:
 8. CONCLUSÃO
 ------------
 
-- O autovalor calculado foi n + 1 em todos os casos (2049, 4097, ...), que é
-  o valor certo. Mudar o número de processos não muda a resposta.
+- O autovalor calculado foi n + 1 em todos os casos (2049, 4097, 8193 e
+  16385), que é o valor certo. Mudar o número de processos não muda a
+  resposta, só o tempo.
 
-- Até 32 processos (tudo no mesmo nó), o speedup ficou perto do ideal. Com
-  n = 2048 e steps = 100, por exemplo:
+- De 1 até 16 processos, o speedup ficou quase igual ao ideal em todos os
+  casos (eficiência entre 0,89 e 1,00). Com n = 8192 e steps = 100:
 
       p = 2  -> speedup 2,0  (eficiência 1,00)
-      p = 8  -> speedup 7,6  (eficiência 0,95)
-      p = 32 -> speedup 27,2 (eficiência 0,85)
+      p = 8  -> speedup 8,0  (eficiência 0,99)
+      p = 16 -> speedup 15,7 (eficiência 0,98)
 
-  A eficiência vai caindo aos poucos, porque cada processo faz menos conta,
-  mas a comunicação (MPI_Allreduce e MPI_Allgather) continua acontecendo em
-  todo passo.
+- Com 32 processos no mesmo nó, as matrizes grandes perderam eficiência
+  (n = 8192 e n = 16384 ficaram em torno de 0,64). As matrizes grandes não
+  cabem na memória rápida (cache) dos processadores, então os 32 processos
+  ficam disputando a memória principal do nó, que vira o gargalo. As
+  matrizes menores (n = 2048 e 4096) sofreram menos com isso (eficiência
+  entre 0,78 e 0,89).
 
-- Com 64 processos o programa passa a usar 2 nós, e a comunicação entre nós
-  diferentes é bem mais lenta que dentro do mesmo nó. Aí a eficiência cai
-  bastante. Com n = 2048 e steps = 100, o speedup foi 29,9 (eficiência 0,47),
-  quase igual ao de 32 processos.
+- Com 64 processos o programa passa a usar 2 nós. Aí aparecem duas coisas:
 
-- O número de steps fez diferença justamente com 64 processos. Com n = 2048:
+  * Nas matrizes grandes, o speedup voltou a subir (n = 8192, steps = 100:
+    de 20,9 com 32 processos pra 42,5 com 64), porque agora são 2 nós, cada
+    um com a sua própria memória.
 
-      steps = 10  -> speedup 4,1  (64 processos foi MAIS LENTO que 32)
+  * Nas matrizes pequenas, a comunicação entre os 2 nós pesa muito. Com
+    n = 2048 e steps = 10, 64 processos foi MAIS LENTO que 32 (speedup 4,1
+    contra 25,0).
+
+- O número de steps fez diferença com 64 processos. Com n = 2048:
+
+      steps = 10  -> speedup 4,1
       steps = 50  -> speedup 22,0
       steps = 100 -> speedup 29,9
 
   A primeira comunicação entre os 2 nós tem um custo fixo (preparar a
-  conexão). Com poucos steps, esse custo pesa muito no tempo total. Com mais
-  steps, ele se dilui. Até 32 processos (1 nó só), os steps quase não mudam
-  o speedup.
-
-- Quanto maior a matriz (n), melhor o aproveitamento com 64 processos,
-  porque cada processo tem mais conta pra fazer e a comunicação pesa menos.
-  Com steps = 10, por exemplo, n = 2048 deu speedup 4,1 e n = 4096 deu 35,3.
+  conexão). Com poucos steps esse custo pesa muito no tempo total, e com
+  mais steps ele se dilui. Até 16 processos, os steps quase não mudaram o
+  speedup.
 
 - Durante a execução, o MPI avisou que não conseguiu usar a placa de rede
   rápida (InfiniBand) dos nós e usou outra forma de comunicação. Isso não
   muda os resultados das contas, mas deixa a comunicação entre os 2 nós mais
   lenta, o que ajuda a explicar a queda de eficiência com 64 processos.
+
+- Resumindo: paralelizar compensou muito. O melhor caso foi n = 4096 com
+  steps = 100 e 64 processos, que ficou 51 vezes mais rápido que com 1
+  processo (de 6,6 s pra 0,13 s).

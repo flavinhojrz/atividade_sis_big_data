@@ -40,10 +40,13 @@ with open("tabelas.txt", "w") as arquivo:
 try:
     with open("relatorio.txt") as arquivo:
         relatorio = arquivo.read()
-    marcador = "COLE AQUI O CONTEÚDO DO ARQUIVO tabelas.txt"
-    if marcador in relatorio:
+    cabecalho = "6. TABELAS\n----------\n"
+    inicio = relatorio.find(cabecalho)
+    fim = relatorio.find("7. GRÁFICOS")
+    if inicio != -1 and fim != -1:
+        relatorio = relatorio[:inicio + len(cabecalho)] + "\n" + tabelas.rstrip() + "\n\n\n" + relatorio[fim:]
         with open("relatorio.txt", "w") as arquivo:
-            arquivo.write(relatorio.replace(marcador, tabelas.rstrip()))
+            arquivo.write(relatorio)
 except FileNotFoundError:
     pass
 
